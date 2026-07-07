@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Identity (users, businesses) is owned by the attendance-auth service.
+// This database stores only the attendance domain and references auth users
+// and businesses by their string ids carried in the access token.
+
+enum EmploymentStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ON_LEAVE
+}
+
+enum RevisionType {
+  TIME_CORRECTION
+  LEAVE
+}
+
+enum RevisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Link between an employee (auth user) and a business, created by the owner.
+model Employment {
+  id         String           @id @default(uuid())
+  businessId String
+  userId     String
+  username   String?
+  status     EmploymentStatus @default(ACTIVE)
+  createdBy  String
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  removedAt  DateTime?
+
+  attendance AttendanceRecord[]
+  revisions  RevisionRequest[]
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
+  @@map("employments")
+}
+
+// One row per employee per calendar day.
+model AttendanceRecord {
+  id           String           @id @default(uuid())
+  employmentId String
+  employment   Employment       @relation(fields: [employmentId], references: [id], onDelete: Cascade)
+  businessId   String
+  userId       String
+  date         DateTime         @db.Date
+  checkInAt    DateTime?
+  checkOutAt   DateTime?
+  status       AttendanceStatus @default(PRESENT)
+  note         String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  revisions RevisionRequest[]
+
+  @@unique([userId, businessId, date])
+  @@index([businessId, date])
+  @@index([userId, date])
+  @@map("attendance_records")
+}
+
+// A correction/leave request raised by an employee, reviewed by the owner.
+model RevisionRequest {
+  id           String            @id @default(uuid())
+  employmentId String
+  employment   Employment        @relation(fields: [employmentId], references: [id], onDelete: Cascade)
+  recordId     String?
+  record       AttendanceRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  businessId   String
+  userId       String
+  date         DateTime          @db.Date
+  type         RevisionType
+  requestedCheckInAt  DateTime?
+  requestedCheckOutAt DateTime?
+  reason       String
+  status       RevisionStatus    @default(PENDING)
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  decisionNote String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([businessId, status])
+  @@index([userId, status])
+  @@map("revision_requests")
+}
